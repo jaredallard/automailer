@@ -239,15 +239,15 @@ const main = async () => {
       childLogger.info('sending letter')
       resp = await letterAPI.postLettersSendPost(letter)
     
-      // childLogger.info('sending notification')
-      // const smsMessage = new clicksend.SmsMessage();
-      // smsMessage.to = config.sms.number;
-      // smsMessage.body = `Hello! Automailer has sent a letter to your insurance company due to a new statement being available.`
-      // const smsCollection = new clicksend.SmsMessageCollection();
-      // smsCollection.messages = [smsMessage];
+      childLogger.info('sending notification')
+      const smsMessage = new clicksend.SmsMessage();
+      smsMessage.to = config.sms.number;
+      smsMessage.body = `Hello! Automailer has sent a letter to your insurance company due to a new statement being available.`
+      const smsCollection = new clicksend.SmsMessageCollection();
+      smsCollection.messages = [smsMessage];
     
-      // resp = await SMSApi.smsSendPost(smsCollection)
-      // console.log(resp.body)
+      resp = await SMSApi.smsSendPost(smsCollection)
+      console.log(resp.body)
       childLogger.info('done')
     } catch (err) {
       childLogger.error('failed to process statement:', err.message || err)
