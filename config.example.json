@@ -1,0 +1,24 @@
+{
+  "website": {
+    "url": "https://NAME.clientsecure.me",
+    "login": {
+      "email": "",
+      "password": ""
+    }
+  },
+  "clicksend": {
+    "api_key": "",
+    "username": ""
+  },
+  "sms": {
+    "number": "+11234567891"
+  },
+  "mailing": {
+    "name": "",
+    "line1": "",
+    "city": "Seattle",
+    "state": "WA",
+    "postalCode": "11111", // 11111 is a testing zipcode, mail won't actually be sent with this
+    "country": "USA"
+  },
+}
