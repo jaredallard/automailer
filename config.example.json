@@ -10,10 +10,24 @@
     "api_key": "",
     "username": ""
   },
+  "email": {
+    "enabled": false,
+    "to": {
+      "email": "email@gmail.com",
+      "name": "First Last"
+    },
+    "from": {
+      // set this in the clicksend ui
+      "id": "9147",
+      "name": "First Last"
+    }
+  },
   "sms": {
+    "enabled": false,
     "number": "+11234567891"
   },
   "mailing": {
+    "enabled": false,
     "name": "",
     "line1": "",
     "city": "Seattle",

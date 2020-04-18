@@ -8,14 +8,11 @@
 'use strict';
 
 import * as fs from 'fs-extra'
-import { degrees, PDFDocument, rgb, StandardFonts, last } from 'pdf-lib';
+import { PDFDocument, StandardFonts } from 'pdf-lib';
 import * as cheerio from 'cheerio'
 import * as request from 'request-promise-native'
 import * as url from 'url'
-import * as toughCookie from 'tough-cookie'
-import { stat } from 'fs';
 import * as clicksend from 'clicksend'
-import { levels } from 'pino';
 
 const log = require('pino')()
 
@@ -140,7 +137,7 @@ const getReimbursementStatement = async (config: any) => {
   cookieJar.setCookie(request.cookie('ember_simple_auth-redirectTarget=%2Fbilling;'), config.website.url)
   cookieJar.setCookie(request.cookie(resp.headers['set-cookie'].join(" ")), config.website.url)
 
-  log.info(`found ${statementResp.data.length} statements:`, statementResp.data)
+  log.info(`found ${statementResp.data.length} statements`)
 
   const lastDateStr = config.state.lastDate || new Date().toISOString()
   const lastDate = Date.parse(lastDateStr)
@@ -176,6 +173,7 @@ const getReimbursementStatement = async (config: any) => {
 const main = async () => {
   const config = require('../config.json')
   const letterAPI = new clicksend.PostLetterApi(config.clicksend.username, config.clicksend.api_key)
+  const emailAPI = new clicksend.TransactionalEmailApi(config.clicksend.username, config.clicksend.api_key)
   const uploadAPI = new clicksend.UploadApi(config.clicksend.username, config.clicksend.api_key)
   const returnAddrAPI = new clicksend.PostReturnAddressApi(config.clicksend.username, config.clicksend.api_key)
   const SMSApi = new clicksend.SMSApi(config.clicksend.username, config.clicksend.api_key)
@@ -200,54 +198,89 @@ const main = async () => {
     
       childLogger.info('merging pdfs')
       const merged = await mergePDFs([pdf, statement.pdf])
+  
+
+      if (config.email.enabled) {
+        const email = new clicksend.Email();
+        const pdfAttachment = new clicksend.Attachment()
+
+
+        const from = new clicksend.EmailFrom()
+        from.emailAddressId = config.email.from.id
+        from.name = config.email.from.name
+        
+        const to = new clicksend.EmailRecipient()
+        to.email = config.email.to.email
+        to.name = config.email.to.name
+
+        pdfAttachment.type = 'application/pdf'
+        pdfAttachment.content =  Buffer.from(merged).toString('base64')
+        pdfAttachment.disposition = 'attachment'
+        pdfAttachment.filename = 'statement.pdf'
+        email.attachments = [pdfAttachment]
+        email.subject = 'New Statement'
+        email.body = "A new statement has been generated."
+        email.to = [to]
+        email.from = from
+
+        childLogger.info('sending email')
+        const resp = await emailAPI.emailSendPost(email)
+        console.log(resp.body)
+      }
     
-      childLogger.info('uploading pdf to clicksend')
-      const upload = new clicksend.UploadFile()
-      upload.content = Buffer.from(merged).toString('base64')
-      const uploadResp = await uploadAPI.uploadsPost(upload, 'post')
+      if (config.mailing.enabled) {
+        childLogger.info('uploading pdf to clicksend')
+        const upload = new clicksend.UploadFile()
+        upload.content = Buffer.from(merged).toString('base64')
+        const uploadResp = await uploadAPI.uploadsPost(upload, 'post')
+
+        childLogger.info('getting return addresse(s)')
+        let resp = await returnAddrAPI.postReturnAddressesGet(1, 1)
+      
+        const returnAddr = resp.body.data.data[0]
+        childLogger.info('using return address', returnAddr)
+      
+        const recp = new clicksend.PostRecipient();
+        recp.addressName = config.mailing.name
+        recp.addressLine1 = config.mailing.line1
+        recp.addressCity = config.mailing.city
+        recp.addressState = config.mailing.state
+        recp.addressPostalCode = config.mailing.postalCode
+        recp.addressCountry = config.mailing.country
+        recp.returnAddressId = returnAddr.return_address_id
+      
+      
+        childLogger.info('sending letter to', recp)
+        const letter = new clicksend.PostLetter();
+        letter.fileUrl = uploadResp.body.data._url
+        letter.priorityPost = 0
+        // TODO(jaredallard): allow sending yourself a copy
+        letter.recipients = [recp]
+        letter.templateUsed = 0
+        letter.colour = 0
+        letter.duplex = 0
+      
+        childLogger.info('getting letter cost')
+        resp = await letterAPI.postLettersPricePost(letter)
+        childLogger.info('sending letter will cost', `${resp.body.data._currency.currency_prefix_d}${resp.body.data.total_price}`)
+      
+        childLogger.info('sending letter')
+        resp = await letterAPI.postLettersSendPost(letter)
+        console.log(resp.body)
+      }
     
-      childLogger.info('getting return addresse(s)')
-      let resp = await returnAddrAPI.postReturnAddressesGet(1, 1)
-    
-      const returnAddr = resp.body.data.data[0]
-      childLogger.info('using return address', returnAddr)
-    
-      const recp = new clicksend.PostRecipient();
-      recp.addressName = config.mailing.name
-      recp.addressLine1 = config.mailing.line1
-      recp.addressCity = config.mailing.city
-      recp.addressState = config.mailing.state
-      recp.addressPostalCode = config.mailing.postalCode
-      recp.addressCountry = config.mailing.country
-      recp.returnAddressId = returnAddr.return_address_id
-    
-    
-      childLogger.info('sending letter to', recp)
-      const letter = new clicksend.PostLetter();
-      letter.fileUrl = uploadResp.body.data._url
-      letter.priorityPost = 0
-      // TODO(jaredallard): allow sending yourself a copy
-      letter.recipients = [recp]
-      letter.templateUsed = 0
-      letter.colour = 0
-      letter.duplex = 0
-    
-      childLogger.info('getting letter cost')
-      resp = await letterAPI.postLettersPricePost(letter)
-      childLogger.info('sending letter will cost', `${resp.body.data._currency.currency_prefix_d}${resp.body.data.total_price}`)
-    
-      childLogger.info('sending letter')
-      resp = await letterAPI.postLettersSendPost(letter)
-    
-      childLogger.info('sending notification')
-      const smsMessage = new clicksend.SmsMessage();
-      smsMessage.to = config.sms.number;
-      smsMessage.body = `Hello! Automailer has sent a letter to your insurance company due to a new statement being available.`
-      const smsCollection = new clicksend.SmsMessageCollection();
-      smsCollection.messages = [smsMessage];
-    
-      resp = await SMSApi.smsSendPost(smsCollection)
-      console.log(resp.body)
+      if (config.sms.enabled) {
+        childLogger.info('sending notification')
+        const smsMessage = new clicksend.SmsMessage();
+        smsMessage.to = config.sms.number;
+        smsMessage.body = `Hello! Automailer has sent a letter to your insurance company due to a new statement being available.`
+        const smsCollection = new clicksend.SmsMessageCollection();
+        smsCollection.messages = [smsMessage];
+      
+        const resp = await SMSApi.smsSendPost(smsCollection)
+        console.log(resp)
+      }
+
       childLogger.info('done')
     } catch (err) {
       childLogger.error('failed to process statement:', err.message || err)
